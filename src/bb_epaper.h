@@ -34,6 +34,8 @@
 #include <stdio.h>
 #endif // __LINUX__
 
+#include "lvgl_compat.h"
+
 // error messages
 enum {
     BBEP_SUCCESS,
@@ -478,6 +480,7 @@ class BBEPAPER
     void wait(bool bQuick = false);
     bool isBusy(void);
     void drawString(const char *pText, int x, int y);
+    void drawStringNew(const bb_lv_font_t *font, const char *pText, int x, int y, bool use_kerning);
     void setPlane(int iPlane);
     int getPlane(void);
     int getChip(void);
@@ -520,5 +523,6 @@ typedef enum
 void bbepWriteCmd(BBEPDISP *pBBEP, uint8_t cmd);
 void bbepWriteData(BBEPDISP *pBBEP, uint8_t *pData, int iLen);
 void bbepCMD2(BBEPDISP *pBBEP, uint8_t cmd1, uint8_t cmd2);
+int bbepWriteStringNew(BBEPDISP *pBBEP, int x, int y, char *szMsg, int iColor, int iBG);
 #endif // __BB_EPAPER__
 

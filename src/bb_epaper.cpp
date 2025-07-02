@@ -43,6 +43,7 @@ void delay(int);
 #endif // __LINUX__
 #include "bb_ep.inl" // All of the display interface code is in here
 #include "bb_ep_gfx.inl" // drawing code
+#include "bb_ep_font.inl" // font handling with kerning support
 
 #ifdef __cplusplus
 //
@@ -543,6 +544,11 @@ void BBEPAPER::drawString(const char *pText, int x, int y)
         bbepWriteString(&_bbep, x, y, (char *)pText, _bbep.iFont, _bbep.iFG, _bbep.iBG);
     }
 } /* drawString() */
+
+void BBEPAPER::drawStringNew(const bb_lv_font_t *font, const char *pText, int x, int y, bool use_kerning)
+{
+    bbepWriteStringNew(&_bbep, font, x, y, (char *)pText, _bbep.iFG, _bbep.iBG, use_kerning);
+} /* drawStringNew() */
 
 void BBEPAPER::setPlane(int iPlane)
 {
