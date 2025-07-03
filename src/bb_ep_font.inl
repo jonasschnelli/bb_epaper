@@ -140,9 +140,11 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
         iBG = pBBEP->pColorLookup[iBG & 0xf];
     }
     
+    int orig_x = x;  // Store original x position for newline handling
     if (x == -1 || y == -1) {
         x = pBBEP->iCursorX; 
         y = pBBEP->iCursorY;
+        orig_x = x;  // Update orig_x if using cursor position
     } else {
         pBBEP->iCursorX = x; 
         pBBEP->iCursorY = y;
@@ -175,8 +177,25 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
     while (szMsg[i] != 0 && x < pBBEP->width) {
         c = (unsigned char)szMsg[i];
         
+        // Debug output for every character
+        printf("DEBUG: Processing char '%c' (0x%02X) at position %d\n", 
+               (c >= 32 && c <= 126) ? c : '?', c, i);
+        
+        // Handle newline character
+        if (c == '\n') {
+            printf("DEBUG: Found newline! x=%d->%d, y=%d->%ld\n", x, orig_x, y, (long)(y + font->line_height));
+            x = orig_x;  // Reset to original x position
+            y += font->line_height;
+            pBBEP->iCursorX = x;
+            pBBEP->iCursorY = y;
+            i++;
+            continue;
+        }
+        
         // Find glyph index for character
         uint16_t glyph_id = 0;
+        printf("DEBUG: Checking if char '%c' (0x%02X) is in range [%ld..%ld]\n", 
+               (c >= 32 && c <= 126) ? c : '?', c, (long)cmap->range_start, (long)(cmap->range_start + cmap->range_length - 1));
         if (c >= cmap->range_start && c < (cmap->range_start + cmap->range_length)) {
             if (cmap->type == BB_LV_FONT_FMT_TXT_CMAP_SPARSE_TINY && cmap->unicode_list) {
                 // Sparse mapping: search in unicode_list
@@ -191,6 +210,8 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
                 }
                 if (!found) {
                     // Character not in sparse list, skip
+                    printf("DEBUG: Character '%c' (0x%02X) not found in sparse mapping, skipping\n", 
+                           (c >= 32 && c <= 126) ? c : '?', c);
                     i++;
                     continue;
                 }
@@ -200,6 +221,8 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
             }
         } else {
             // Character not found, skip
+            printf("DEBUG: Character '%c' (0x%02X) not in font range, skipping\n", 
+                   (c >= 32 && c <= 126) ? c : '?', c);
             i++;
             continue;
         }
