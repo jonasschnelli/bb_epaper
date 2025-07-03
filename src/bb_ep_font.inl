@@ -3,6 +3,9 @@
 // Font handling functions with kerning support for BB_EPaper library
 //
 
+// Debug control
+static bool bbep_font_debug = false;
+
 //
 // Helper function to convert glyph ID back to Unicode character for sparse fonts
 //
@@ -47,7 +50,7 @@ void bbep_debug_kerning_pairs(const bb_lv_font_t *font)
 {
     const bb_lv_font_fmt_txt_dsc_t *fdsc = (bb_lv_font_fmt_txt_dsc_t*)font->dsc;
     if (!fdsc || !fdsc->kern_dsc) {
-        printf("No kerning data available\n");
+        if (bbep_font_debug) printf("No kerning data available\n");
         return;
     }
     
@@ -56,7 +59,7 @@ void bbep_debug_kerning_pairs(const bb_lv_font_t *font)
     const int8_t *values = (const int8_t*)kern_pairs->values;
     uint32_t pair_cnt = kern_pairs->pair_cnt;
     
-    printf("Kerning pairs available (%ld total, scale=%d):\n", (long)pair_cnt, fdsc->kern_scale);
+    if (bbep_font_debug) printf("Kerning pairs available (%ld total, scale=%d):\n", (long)pair_cnt, fdsc->kern_scale);
     
     // Show first 10 pairs as examples
     for (uint32_t i = 0; i < pair_cnt && i < 10; i++) {
@@ -72,13 +75,13 @@ void bbep_debug_kerning_pairs(const bb_lv_font_t *font)
         char left_char = (left_unicode > 0 && left_unicode < 127) ? (char)left_unicode : '?';
         char right_char = (right_unicode > 0 && right_unicode < 127) ? (char)right_unicode : '?';
         
-        printf("  %ld: '%c%c' (glyph %d->%d, unicode %ld->%ld) raw=%d scaled=%d\n", 
+        if (bbep_font_debug) printf("  %ld: '%c%c' (glyph %d->%d, unicode %ld->%ld) raw=%d scaled=%d\n", 
                (long)i, left_char, right_char, left, right, 
                (long)left_unicode, (long)right_unicode, raw_value, scaled_value);
     }
     
     if (pair_cnt > 10) {
-        printf("  ... and %ld more pairs\n", (long)(pair_cnt - 10));
+        if (bbep_font_debug) printf("  ... and %ld more pairs\n", (long)(pair_cnt - 10));
     }
 }
 
@@ -108,7 +111,7 @@ int32_t bbep_get_kerning(const bb_lv_font_t *font, uint8_t left_glyph_id, uint8_
             // Found the pair, apply LVGL scaling: (value * kern_scale) >> 4
             int32_t kern_value = values[i];
             int32_t result = ((int32_t)((int32_t)kern_value * fdsc->kern_scale) >> 4);
-            printf("  FOUND kerning pair at index %ld: raw=%ld, scaled_fp=%ld (%.1f pixels)\n", 
+            if (bbep_font_debug) printf("  FOUND kerning pair at index %ld: raw=%ld, scaled_fp=%ld (%.1f pixels)\n", 
                    (long)i, (long)kern_value, (long)result, (float)result / 16.0f);
             return result;
         }
@@ -118,9 +121,90 @@ int32_t bbep_get_kerning(const bb_lv_font_t *font, uint8_t left_glyph_id, uint8_
 }
 
 //
+// Helper function to calculate word width for word wrapping
+//
+int bbep_calculate_word_width(const bb_lv_font_t *font, const char *word_start, int word_len, bool use_kerning)
+{
+    const bb_lv_font_fmt_txt_dsc_t *fdsc = (bb_lv_font_fmt_txt_dsc_t*)font->dsc;
+    const bb_lv_font_fmt_txt_glyph_dsc_t *glyph_dsc = fdsc->glyph_dsc;
+    const bb_lv_font_fmt_txt_cmap_t *cmap = fdsc->cmaps;
+    
+    int word_width = 0;
+    
+    for (int i = 0; i < word_len; i++) {
+        unsigned char c = (unsigned char)word_start[i];
+        
+        // Find glyph index for character
+        uint16_t glyph_id = 0;
+        bool found = false;
+        
+        if (c >= cmap->range_start && c < (cmap->range_start + cmap->range_length)) {
+            if (cmap->type == BB_LV_FONT_FMT_TXT_CMAP_SPARSE_TINY && cmap->unicode_list) {
+                // Sparse mapping: search in unicode_list
+                uint16_t char_offset = c - cmap->range_start;
+                for (uint16_t j = 0; j < cmap->list_length; j++) {
+                    if (cmap->unicode_list[j] == char_offset) {
+                        glyph_id = cmap->glyph_id_start + j;
+                        found = true;
+                        break;
+                    }
+                }
+            } else {
+                // Dense mapping
+                glyph_id = cmap->glyph_id_start + (c - cmap->range_start);
+                found = true;
+            }
+        }
+        
+        if (!found) continue;
+        
+        // Get glyph descriptor
+        const bb_lv_font_fmt_txt_glyph_dsc_t *glyph = &glyph_dsc[glyph_id];
+        uint32_t adv_w = glyph->adv_w; // Keep in 12.4 fixed point format
+        
+        // Add kerning with next character if available
+        int32_t kerning_fp = 0;
+        if (use_kerning && i + 1 < word_len) {
+            unsigned char next_c = (unsigned char)word_start[i + 1];
+            if (next_c >= cmap->range_start && next_c < (cmap->range_start + cmap->range_length)) {
+                uint16_t next_glyph_id = 0;
+                bool next_found = false;
+                
+                if (cmap->type == BB_LV_FONT_FMT_TXT_CMAP_SPARSE_TINY && cmap->unicode_list) {
+                    uint16_t char_offset = next_c - cmap->range_start;
+                    for (uint16_t j = 0; j < cmap->list_length; j++) {
+                        if (cmap->unicode_list[j] == char_offset) {
+                            next_glyph_id = cmap->glyph_id_start + j;
+                            next_found = true;
+                            break;
+                        }
+                    }
+                } else {
+                    next_glyph_id = cmap->glyph_id_start + (next_c - cmap->range_start);
+                    next_found = true;
+                }
+                
+                if (next_found) {
+                    kerning_fp = bbep_get_kerning(font, glyph_id, next_glyph_id);
+                }
+            }
+        }
+        
+        // Apply kerning to advance width
+        adv_w += kerning_fp;
+        
+        // Convert to integer with rounding
+        uint32_t advance = (adv_w + (1 << 3)) >> 4;
+        word_width += advance;
+    }
+    
+    return word_width;
+}
+
+//
 // Write a string of text using the new testfont format
 //
-int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, char *szMsg, int iColor, int iBG, bool use_kerning)
+int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, char *szMsg, int iColor, int iBG, bool use_kerning, int width)
 {
     int i;
     unsigned char c;
@@ -178,12 +262,12 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
         c = (unsigned char)szMsg[i];
         
         // Debug output for every character
-        printf("DEBUG: Processing char '%c' (0x%02X) at position %d\n", 
+        if (bbep_font_debug) printf("DEBUG: Processing char '%c' (0x%02X) at position %d\n", 
                (c >= 32 && c <= 126) ? c : '?', c, i);
         
         // Handle newline character
         if (c == '\n') {
-            printf("DEBUG: Found newline! x=%d->%d, y=%d->%ld\n", x, orig_x, y, (long)(y + font->line_height));
+            if (bbep_font_debug) printf("DEBUG: Found newline! x=%d->%d, y=%d->%ld\n", x, orig_x, y, (long)(y + font->line_height));
             x = orig_x;  // Reset to original x position
             y += font->line_height;
             pBBEP->iCursorX = x;
@@ -192,9 +276,38 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
             continue;
         }
         
+        // Word wrapping logic
+        if (width > 0 && c != ' ') {
+            // Find the end of the current word
+            int word_start = i;
+            int word_len = 0;
+            while (szMsg[i + word_len] != 0 && szMsg[i + word_len] != ' ' && szMsg[i + word_len] != '\n') {
+                word_len++;
+            }
+            
+            if (word_len > 0) {
+                // Calculate the width of this word
+                int word_width = bbep_calculate_word_width(font, &szMsg[word_start], word_len, use_kerning);
+                
+                // Check if the word would overflow the line
+                if (x + word_width > orig_x + width) {
+                    // Only wrap if we're not at the beginning of the line
+                    // and if the word itself isn't longer than the whole width
+                    if (x > orig_x && word_width <= width) {
+                        if (bbep_font_debug) printf("DEBUG: Word wrapping! Word width=%d, would overflow at x=%d+%d > %d+%d\n", 
+                               word_width, x, word_width, orig_x, width);
+                        x = orig_x;  // Reset to original x position
+                        y += font->line_height;
+                        pBBEP->iCursorX = x;
+                        pBBEP->iCursorY = y;
+                    }
+                }
+            }
+        }
+        
         // Find glyph index for character
         uint16_t glyph_id = 0;
-        printf("DEBUG: Checking if char '%c' (0x%02X) is in range [%ld..%ld]\n", 
+        if (bbep_font_debug) printf("DEBUG: Checking if char '%c' (0x%02X) is in range [%ld..%ld]\n", 
                (c >= 32 && c <= 126) ? c : '?', c, (long)cmap->range_start, (long)(cmap->range_start + cmap->range_length - 1));
         if (c >= cmap->range_start && c < (cmap->range_start + cmap->range_length)) {
             if (cmap->type == BB_LV_FONT_FMT_TXT_CMAP_SPARSE_TINY && cmap->unicode_list) {
@@ -210,7 +323,7 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
                 }
                 if (!found) {
                     // Character not in sparse list, skip
-                    printf("DEBUG: Character '%c' (0x%02X) not found in sparse mapping, skipping\n", 
+                    if (bbep_font_debug) printf("DEBUG: Character '%c' (0x%02X) not found in sparse mapping, skipping\n", 
                            (c >= 32 && c <= 126) ? c : '?', c);
                     i++;
                     continue;
@@ -221,7 +334,7 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
             }
         } else {
             // Character not found, skip
-            printf("DEBUG: Character '%c' (0x%02X) not in font range, skipping\n", 
+            if (bbep_font_debug) printf("DEBUG: Character '%c' (0x%02X) not in font range, skipping\n", 
                    (c >= 32 && c <= 126) ? c : '?', c);
             i++;
             continue;
@@ -234,7 +347,7 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
         if (c == 'A' || c == 'V' || c == 'N' || c == 'o' || c == 'w' || c == 'y') {
             int top_to_baseline = font->line_height - font->base_line;
             int glyph_y = y + top_to_baseline - glyph->box_h - glyph->ofs_y;
-            printf("  DEBUG '%c': box_h=%d, ofs_y=%d, top_to_baseline=%d, glyph_y=%d\n", 
+            if (bbep_font_debug) printf("  DEBUG '%c': box_h=%d, ofs_y=%d, top_to_baseline=%d, glyph_y=%d\n", 
                    c, glyph->box_h, glyph->ofs_y, top_to_baseline, glyph_y);
         }
         
@@ -302,7 +415,7 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
                     kerning_fp = bbep_get_kerning(font, glyph_id, next_glyph_id);
                     
                     if (kerning_fp != 0) {
-                        printf("  Kerning '%c%c' (glyph %d->%d): %.1f pixels (fp: %ld)\n", 
+                        if (bbep_font_debug) printf("  Kerning '%c%c' (glyph %d->%d): %.1f pixels (fp: %ld)\n", 
                                c, next_c, glyph_id, next_glyph_id, (float)kerning_fp / 16.0f, (long)kerning_fp);
                     }
                 }
@@ -316,7 +429,7 @@ int bbepWriteStringNew(BBEPDISP *pBBEP, const bb_lv_font_t *font, int x, int y, 
         // This matches: adv_w = (adv_w + (1 << 3)) >> 4;
         uint32_t advance = (adv_w + (1 << 3)) >> 4;
         
-        printf("  '%c' drawn at x=%d, base_adv_fp: %ld, kerning_fp: %ld, final_adv_fp: %ld, final_advance: %ld, cursor moves to x=%ld\n", 
+        if (bbep_font_debug) printf("  '%c' drawn at x=%d, base_adv_fp: %ld, kerning_fp: %ld, final_adv_fp: %ld, final_advance: %ld, cursor moves to x=%ld\n", 
                c, x, (long)glyph->adv_w, (long)kerning_fp, (long)adv_w, (long)advance, (long)(x + advance));
         x += advance;
         i++;

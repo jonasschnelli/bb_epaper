@@ -545,9 +545,9 @@ void BBEPAPER::drawString(const char *pText, int x, int y)
     }
 } /* drawString() */
 
-void BBEPAPER::drawStringNew(const bb_lv_font_t *font, const char *pText, int x, int y, bool use_kerning)
+void BBEPAPER::drawStringNew(const bb_lv_font_t *font, const char *pText, int x, int y, bool use_kerning, int width)
 {
-    bbepWriteStringNew(&_bbep, font, x, y, (char *)pText, _bbep.iFG, _bbep.iBG, use_kerning);
+    bbepWriteStringNew(&_bbep, font, x, y, (char *)pText, _bbep.iFG, _bbep.iBG, use_kerning, width);
 } /* drawStringNew() */
 
 void BBEPAPER::setPlane(int iPlane)
